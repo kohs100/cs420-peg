@@ -1,22 +1,91 @@
-use crate::ast::*;
+use ast_printer::DisplayCode;
+
+use crate::ast::expr::*;
+use crate::ast::print_commasep;
+use crate::ast::types::*;
+
 use std::fmt::Debug;
 use std::fmt::Display;
+use std::fmt::Write;
 use std::ops;
 
-const INT_WIDTH: usize = 4;
-const INT_ATYP: ATyp = ATyp::Int(true, INT_WIDTH);
-const INT_TYP: Typ = Typ::Arith(INT_ATYP);
+use crate::types::defs::ATyp::*;
+use crate::types::defs::Typ::*;
 
-pub type TypeResult<T> = Result<T, TypeError>;
+const INT_WIDTH: usize = 4;
+const INT_ATYP: ATyp = Int(true, INT_WIDTH);
+
+pub type TypeResult<T> = Result<T, PositionalTypeError>;
+
+#[derive(Debug, Clone)]
+pub enum ErrorLocation {
+    Stmt(Stmt),
+    Decl(Declaration),
+}
+impl ErrorLocation {
+    pub fn get_position(&self) -> Position {
+        match self {
+            Self::Stmt(stmt) => stmt.get_position().clone(),
+            Self::Decl(Declaration(_, _, pos)) => pos.clone(),
+        }
+    }
+}
+impl Display for ErrorLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stmt(stmt) => write!(f, "{}", stmt),
+            Self::Decl(decl) => write!(f, "{}", decl),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PositionalTypeError {
+    err: TypeError,
+    at: Vec<ErrorLocation>,
+}
+impl From<TypeError> for PositionalTypeError {
+    fn from(value: TypeError) -> Self {
+        Self {
+            err: value,
+            at: Vec::new(),
+        }
+    }
+}
+pub trait AddPosition<T> {
+    fn at(&mut self, pos: T);
+}
+impl AddPosition<Stmt> for PositionalTypeError {
+    fn at(&mut self, pos: Stmt) {
+        self.at.push(ErrorLocation::Stmt(pos));
+    }
+}
+impl AddPosition<Declaration> for PositionalTypeError {
+    fn at(&mut self, pos: Declaration) {
+        self.at.push(ErrorLocation::Decl(pos));
+    }
+}
+
+impl Display for PositionalTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(pos) = self.at.get(0) {
+            write!(f, "{}\n  Occured at >> {} <<", self.err, pos)
+        } else {
+            write!(f, "{}", self.err)
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum TypeError {
     InvalidIdentifier(String),
     InvalidDefinition(String),
     Redefinition(String),
-    NoValidMain(String),
-    TypeMismatch(Typ, Typ),
+    TypeMismatch(String, Typ, Typ),
+    TypesMismatch(String, Vec<Typ>, Vec<Typ>),
     TypeIncompatible,
+    NotBool(Typ),
+    NotCallable(Typ),
 }
 impl Display for TypeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -30,14 +99,28 @@ impl Display for TypeError {
             Self::Redefinition(i) => {
                 write!(f, "Invalid redefinition of identifier: {}", i)
             }
-            Self::NoValidMain(i) => {
-                write!(f, "Invalid entry point: {}", i)
+            Self::TypeMismatch(i, lt, rt) => {
+                write!(f, "Type mismatch: {}: {} vs {}", i, lt, rt)
             }
-            Self::TypeMismatch(lt, rt) => {
-                write!(f, "Type mismatch: {} vs {}", lt, rt)
+            Self::TypesMismatch(i, lts, rts) => {
+                write!(f, "Types mismatch: {}: [", i)?;
+                for lt in lts {
+                    write!(f, "{},", lt)?;
+                }
+                write!(f, "] vs [")?;
+                for rt in rts {
+                    write!(f, "{}, ", rt)?;
+                }
+                write!(f, "]")
             }
             Self::TypeIncompatible => {
                 write!(f, "Type incompatible")
+            }
+            Self::NotBool(typ) => {
+                write!(f, "Cannot be bool: {}", typ)
+            }
+            Self::NotCallable(typ) => {
+                write!(f, "Cannot be callsed: {}", typ)
             }
         }
     }
@@ -46,7 +129,7 @@ impl Display for TypeError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Typ {
     Address(Box<Typ>),
-    Array(Box<Typ>, u64),
+    Array(Box<Typ>, usize),
     Void,
     Arith(ATyp),
     FuncDecl(Box<Typ>, Vec<Typ>),
@@ -61,27 +144,31 @@ pub enum ATyp {
 
 impl Into<Typ> for ATyp {
     fn into(self) -> Typ {
-        Typ::Arith(self)
+        Arith(self)
     }
-}
-
-// Implicit conversion between arithmetic types
-// https://en.cppreference.com/w/cpp/language/implicit_conversion
-// https://en.cppreference.com/w/cpp/language/array#Array-to-pointer_decay
-pub trait ImplicitConversion<T> {
-    fn becomes(&self, rhs: T) -> bool;
 }
 
 impl Display for Typ {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Address(i) => write!(f, "*{}", i),
-            Self::Array(typ, sz) => write!(f, "{}[{}]", typ, sz),
+            Self::Address(i) => {
+                write!(f, "*{}", i)
+            }
+            Self::Array(typ, sz) => {
+                write!(f, "{}[{}]", typ, sz)
+            }
             Self::Void => write!(f, "void"),
             Self::Arith(atyp) => write!(f, "{}", atyp),
             Self::FuncDecl(rettyp, ptypes) => {
                 write!(f, "{}(", rettyp)?;
-                print_commasep(f, ptypes)?;
+                let mut it = ptypes.iter().peekable();
+                while let Some(i) = it.next() {
+                    if it.peek().is_some() {
+                        write!(f, "{}, ", i)?;
+                    } else {
+                        write!(f, "{}", i)?;
+                    }
+                }
                 write!(f, ")")
             }
         }
@@ -103,6 +190,12 @@ impl Display for ATyp {
         }
     }
 }
+// Implicit conversion between arithmetic types
+// https://en.cppreference.com/w/cpp/language/implicit_conversion
+// https://en.cppreference.com/w/cpp/language/array#Array-to-pointer_decay
+pub trait ImplicitConversion<T> {
+    fn becomes(&self, rhs: T) -> bool;
+}
 
 impl ImplicitConversion<&Typ> for Typ {
     fn becomes(&self, rhs: &Typ) -> bool {
@@ -111,20 +204,27 @@ impl ImplicitConversion<&Typ> for Typ {
             return true;
         }
         match (lhs, rhs) {
-            (Typ::Array(srctyp, _), Typ::Address(tgttyp)) => {
+            (Array(srctyp, _), Address(tgttyp)) => {
                 // Handle array-to-pointer decay.
                 // decay is applied only once for multidimensional array.
                 srctyp == tgttyp
             }
-            (Typ::Arith(at1), Typ::Arith(at2)) => at1.becomes(at2),
-            (Typ::Address(_), Typ::Address(should_void)) => {
+            (Arith(at1), Arith(at2)) => at1.becomes(at2),
+            (Address(_), Address(should_void)) => {
                 // Pointer conversions
                 // Implicit conversion into void pointer
-                should_void.as_ref() == &Typ::Void
+                should_void.as_ref() == &Void
             }
-            (lhs, Typ::Arith(ATyp::Bool)) => {
+            (lhs @ FuncDecl(_, _), Address(btyp)) => {
+                // Function-to-pointer conversion
+                match btyp.as_ref() {
+                    rhs @ FuncDecl(_, _) => lhs == rhs,
+                    _ => false,
+                }
+            }
+            (lhs, Arith(Bool)) => {
                 // Boolean conversions.
-                lhs != &Typ::Void
+                lhs != &Void
             }
             _ => false,
         }
@@ -150,7 +250,7 @@ impl ImplicitConversion<&ATyp> for ATyp {
 
 impl ImplicitConversion<ATyp> for Typ {
     fn becomes(&self, rhs: ATyp) -> bool {
-        self.becomes(&Typ::Arith(rhs))
+        self.becomes(&Arith(rhs))
     }
 }
 
@@ -165,47 +265,122 @@ impl Typ {
         }
     }
 
-    const fn from_primtype(value: &PrimType) -> Self {
+    pub const fn from_primtype(value: &PrimType) -> Self {
         match value {
-            PrimType::Char => Typ::Arith(ATyp::Int(true, 1)),
-            PrimType::Double => Typ::Arith(ATyp::Float(8)),
-            PrimType::Float => Typ::Arith(ATyp::Float(4)),
-            PrimType::Int => Typ::Arith(ATyp::Int(true, INT_WIDTH)),
-            PrimType::Long => Typ::Arith(ATyp::Int(true, 8)),
-            PrimType::Short => Typ::Arith(ATyp::Int(true, 2)),
-            PrimType::Signed => Typ::Arith(ATyp::Int(true, 4)),
-            PrimType::Unsigned => Typ::Arith(ATyp::Int(false, 4)),
-            PrimType::Void => Typ::Void,
-            PrimType::Bool => Typ::Arith(ATyp::Bool),
+            PrimType::Char => Arith(Int(true, 1)),
+            PrimType::Double => Arith(Float(8)),
+            PrimType::Float => Arith(Float(4)),
+            PrimType::Int => Arith(Int(true, INT_WIDTH)),
+            PrimType::Long => Arith(Int(true, 8)),
+            PrimType::Short => Arith(Int(true, 2)),
+            PrimType::Signed => Arith(Int(true, 4)),
+            PrimType::Unsigned => Arith(Int(false, 4)),
+            PrimType::Void => Void,
+            PrimType::Bool => Arith(Bool),
         }
     }
 
-    pub fn from_decl(ptype: &PrimType, decl: &Declarator) -> Typ {
-        let (plv, dd) = match decl {
+    pub fn if_bool<T>(&self, value: T) -> TypeResult<T> {
+        if self.becomes(Bool) {
+            Ok(value)
+        } else {
+            Err(TypeError::NotBool(self.clone()).into())
+        }
+    }
+}
+
+pub trait IntoTyp<I> {
+    fn to_typ(&self, inner: I) -> Typ;
+}
+
+impl<T> IntoTyp<&PrimType> for T
+where
+    T: IntoTyp<Typ>,
+{
+    fn to_typ(&self, inner: &PrimType) -> Typ {
+        self.to_typ(Typ::from_primtype(inner))
+    }
+}
+
+impl IntoTyp<Typ> for DirectDeclarator {
+    fn to_typ(&self, inner: Typ) -> Typ {
+        match self {
+            DirectDeclarator::Declarator(nxt) => nxt.to_typ(inner),
+            DirectDeclarator::Array(nxt, sz) => nxt.to_typ(Array(Box::new(inner), *sz)),
+
+            DirectDeclarator::Func(nxt, params) => {
+                let cur = FuncDecl(
+                    Box::new(inner),
+                    params
+                        .iter()
+                        .map(|pd| match pd {
+                            ParamDeclaration::Named(ptype, decl) => decl.to_typ(ptype),
+                            ParamDeclaration::Abstract(ptype, adecl) => adecl.to_typ(ptype),
+                        })
+                        .collect(),
+                );
+                nxt.to_typ(cur)
+            }
+            DirectDeclarator::Scala(_) => inner,
+        }
+    }
+}
+
+impl IntoTyp<Typ> for Declarator {
+    fn to_typ(&self, inner: Typ) -> Typ {
+        let (plv, nxt) = match self {
             Declarator::Init(plv, dd, _) => (plv, dd),
             Declarator::NoInit(plv, dd) => (plv, dd),
         };
 
-        let typ = (0..*plv).fold(Typ::from_primtype(ptype), |acc, _| {
-            Typ::Address(Box::new(acc))
-        });
+        let cur = (0..*plv).fold(inner, |acc, _| Address(Box::new(acc)));
+        nxt.to_typ(cur)
+    }
+}
 
-        match dd {
-            DirectDeclarator::Array(_, len) => len
-                .iter()
-                .rev()
-                .fold(typ, |acc, sz| Typ::Array(Box::new(acc), *sz)),
-            DirectDeclarator::Func(_, params) => Typ::FuncDecl(
-                Box::new(typ),
-                params
-                    .iter()
-                    .map(|pd| {
-                        let ParamDeclaration(pt, dcl) = pd;
-                        Typ::from_decl(pt, dcl)
-                    })
-                    .collect(),
-            ),
-            DirectDeclarator::Scala(_) => typ,
+impl IntoTyp<Typ> for AbstractDeclarator {
+    fn to_typ(&self, inner: Typ) -> Typ {
+        let Self(plv, dd) = self;
+
+        let cur = (0..*plv).fold(inner, |acc, _| Address(Box::new(acc)));
+
+        if let Some(nxt) = dd {
+            nxt.to_typ(cur)
+        } else {
+            cur
+        }
+    }
+}
+
+impl IntoTyp<Typ> for DirectAbstractDeclarator {
+    fn to_typ(&self, inner: Typ) -> Typ {
+        match self {
+            DirectAbstractDeclarator::AbstractDeclarator(nxt) => nxt.to_typ(inner),
+            DirectAbstractDeclarator::Array(nxt, sz) => {
+                let cur = Array(Box::new(inner), *sz);
+                if let Some(nxt) = nxt {
+                    nxt.to_typ(cur)
+                } else {
+                    cur
+                }
+            }
+            DirectAbstractDeclarator::Func(nxt, params) => {
+                let cur = FuncDecl(
+                    Box::new(inner),
+                    params
+                        .iter()
+                        .map(|pd| match pd {
+                            ParamDeclaration::Named(ptype, decl) => decl.to_typ(ptype),
+                            ParamDeclaration::Abstract(ptype, adecl) => adecl.to_typ(ptype),
+                        })
+                        .collect(),
+                );
+                if let Some(nxt) = nxt {
+                    nxt.to_typ(cur)
+                } else {
+                    cur
+                }
+            }
         }
     }
 }
@@ -222,15 +397,15 @@ impl ATyp {
         // Arith operators do not accept integral types smaller than int.
         // Upcast to INT if so.
         match self {
-            ATyp::Int(_, width) => {
+            Int(_, width) => {
                 if *width < INT_WIDTH {
                     INT_ATYP
                 } else {
                     self.clone()
                 }
             }
-            ATyp::Bool => INT_ATYP,
-            ATyp::Float(_) => self.clone(),
+            Bool => INT_ATYP,
+            Float(_) => self.clone(),
         }
     }
 }
@@ -239,14 +414,14 @@ pub trait FromConst<T> {
     fn from_const(cst: T) -> Self;
 }
 
-impl FromConst<u64> for ATyp {
-    fn from_const(num: u64) -> Self {
+impl FromConst<usize> for ATyp {
+    fn from_const(num: usize) -> Self {
         if num <= i32::MAX.try_into().unwrap() {
-            ATyp::Int(true, 4)
+            Int(true, 4)
         } else if num <= u32::MAX.try_into().unwrap() {
-            ATyp::Int(false, 4)
+            Int(false, 4)
         } else if num <= u64::MAX.try_into().unwrap() {
-            ATyp::Int(false, 8)
+            Int(false, 8)
         } else {
             panic!("Integer constant is too big!")
         }
@@ -255,7 +430,7 @@ impl FromConst<u64> for ATyp {
 
 impl FromConst<bool> for ATyp {
     fn from_const(_cst: bool) -> Self {
-        ATyp::Bool
+        Bool
     }
 }
 
@@ -264,14 +439,14 @@ where
     ATyp: FromConst<T>,
 {
     fn from_const(cst: T) -> Self {
-        Typ::Arith(ATyp::from_const(cst))
+        Arith(ATyp::from_const(cst))
     }
 }
 
 impl Typ {
     pub fn from_constexpr(cst: &Expr) -> Self {
         match cst {
-            Expr::ConstFloat(_) => Typ::Arith(ATyp::Float(4)),
+            Expr::ConstFloat(_) => Arith(Float(4)),
             Expr::Const(v) => Typ::from_const(*v),
             Expr::ConstBool(v) => Typ::from_const(*v),
             _ => panic!("Invalid expr!!"),
@@ -288,10 +463,9 @@ impl ops::Add<ATyp> for ATyp {
         let rhs = rhs.promote();
 
         match (lhs, rhs) {
-            (it @ (ATyp::Float(_) | ATyp::Int(_, _)), ft @ ATyp::Float(fb))
-            | (ft @ ATyp::Float(fb), it @ ATyp::Int(_, _)) => {
+            (it @ (Float(_) | Int(_, _)), ft @ Float(fb)) | (ft @ Float(fb), it @ Int(_, _)) => {
                 // If either operand is of floating-point type, ...
-                if let ATyp::Float(ib) = it {
+                if let Float(ib) = it {
                     if ib > fb {
                         it
                     } else {
@@ -301,8 +475,8 @@ impl ops::Add<ATyp> for ATyp {
                     ft
                 }
             }
-            (lt @ ATyp::Int(true, lb), rt @ ATyp::Int(true, rb))
-            | (lt @ ATyp::Int(false, lb), rt @ ATyp::Int(false, rb)) => {
+            (lt @ Int(true, lb), rt @ Int(true, rb))
+            | (lt @ Int(false, lb), rt @ Int(false, rb)) => {
                 // If T1 and T2 are both signed integer types or both unsigned
                 // integer types, C is the type of greater integer conversion
                 // rank.
@@ -312,8 +486,8 @@ impl ops::Add<ATyp> for ATyp {
                     rt
                 }
             }
-            (st @ ATyp::Int(true, sb), ut @ ATyp::Int(false, ub))
-            | (ut @ ATyp::Int(false, ub), st @ ATyp::Int(true, sb)) => {
+            (st @ Int(true, sb), ut @ Int(false, ub))
+            | (ut @ Int(false, ub), st @ Int(true, sb)) => {
                 // Otherwise, one type between T1 and T2 is an signed integer
                 // type S, the other type is an unsigned integer type U.
                 // Apply the following rules:
@@ -329,10 +503,10 @@ impl ops::Add<ATyp> for ATyp {
                 }
                 // Otherwise, C is the unsigned integer type corresponding to S.
                 else {
-                    ATyp::Int(false, sb)
+                    Int(false, sb)
                 }
             }
-            (ATyp::Bool, _) | (_, ATyp::Bool) => {
+            (Bool, _) | (_, Bool) => {
                 unreachable!("atyp cannot be bool after arithmetic promotion")
             }
         }

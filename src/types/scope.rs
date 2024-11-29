@@ -24,19 +24,19 @@ impl<'a> ScopeGuard<'a> {
         }
     }
 
-    pub fn get_type(&self, k: &str) -> TypeResult<Typ> {
-        if let Some(i) = self.symtbl.get(k) {
-            Ok(i.clone())
+    pub fn get_type(&self, k: &str) -> Option<Typ> {
+        if let Some(found) = self.symtbl.get(k) {
+            Some(found.clone())
         } else if let Some(parent) = &self.parent {
             parent.get_type(k)
         } else {
-            Err(TypeError::InvalidIdentifier(k.to_owned()))
+            None
         }
     }
 
     pub fn declare(&mut self, k: &str, typ: Typ) -> TypeResult<()> {
         if self.symtbl.insert(k.to_owned(), typ).is_some() {
-            Err(TypeError::Redefinition(k.to_owned()))
+            Err(TypeError::Redefinition(k.to_owned()).into())
         } else {
             Ok(())
         }

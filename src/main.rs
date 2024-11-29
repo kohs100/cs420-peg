@@ -6,6 +6,7 @@ mod heap;
 mod parser;
 mod types;
 
+use ast::expr::*;
 use parser::clang;
 use peg::{error::ParseError, str::LineCol};
 use types::check::check;
@@ -28,12 +29,12 @@ fn check_func(s: &str) {
     }
 }
 
-fn check_source(s: &str) -> Result<ast::Source, ParseError<LineCol>> {
+fn check_source(s: &str) -> Result<Source, ParseError<LineCol>> {
     let stmt = clang::source(s);
     println!("------------check_source----------");
-    println!("{:?}", &stmt);
+    println!("{:#?}", &stmt);
     println!("   ------------source----------");
-    if let Ok(ast::Source(tus)) = &stmt {
+    if let Ok(Source(tus)) = &stmt {
         for tu in tus {
             println!("{}", tu)
         }
@@ -91,7 +92,7 @@ pub fn main() {
         }
         ",
     );
-    if let Ok(ast::Source(tus)) = res {
+    if let Ok(Source(tus)) = res {
         let _res = check(&tus);
     }
 
@@ -101,7 +102,24 @@ pub fn main() {
             int main() { float b = sum(2, 4.1); }
         ",
     );
-    if let Ok(ast::Source(tus)) = res {
-        let _res = check(&tus);
+    if let Ok(Source(tus)) = res {
+        match check(&tus) {
+            Ok(()) => println!("Type valid!"),
+            Err(perr) => println!("Type invalid: {}", perr),
+        }
+    }
+
+    let res = check_source(
+        "
+            float sum(int a, float);
+            int main() { float b = sum(2, 4); }
+            float sum(int a, float b) { return (float) a + b; }
+        ",
+    );
+    if let Ok(Source(tus)) = res {
+        match check(&tus) {
+            Ok(()) => println!("Type valid!"),
+            Err(perr) => println!("Type invalid: {}", perr),
+        }
     }
 }

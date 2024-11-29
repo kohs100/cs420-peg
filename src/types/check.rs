@@ -1,91 +1,98 @@
-use crate::ast::*;
+use crate::ast::expr::*;
+use crate::ast::types::*;
 
 use crate::types::check_expr::check_expr;
 use crate::types::defs::*;
 use crate::types::scope::ScopeGuard;
 
-fn check_stmt(stmt: &Stmt, sg: &ScopeGuard) -> TypeResult<()> {
-    match stmt {
-        Stmt::CompoundStmt(cstmt) => check_cstmt(cstmt, sg, "cstmt"),
-        Stmt::ExprStmt(None) => Err(TypeError::TypeIncompatible),
-        Stmt::ExprStmt(Some(expr)) => check_expr(expr, &sg).map(|_| ()),
-        Stmt::If(cexpr, stmt) => {
-            if check_expr(cexpr, &sg)?.becomes(ATyp::Bool) {
-                check_stmt(stmt, sg)
-            } else {
-                Err(TypeError::TypeIncompatible)
-            }
+use crate::types::defs::ATyp::*;
+use crate::types::defs::Typ::*;
+
+fn check_stmt_inner(stmt: &Stmt, sg: &ScopeGuard) -> TypeResult<()> {
+    use Stmt::*;
+    let _res: () = match stmt {
+        CompoundStmt(cstmt, _) => {
+            check_cstmt(cstmt, sg, "cstmt")?;
         }
-        Stmt::IfElse(cexpr, tstmt, fstmt) => {
-            if check_expr(cexpr, &sg)?.becomes(ATyp::Bool) {
+        ExprStmt(None, _) => (),
+        ExprStmt(Some(expr), _) => {
+            check_expr(expr, &sg).map(|_| ())?;
+        }
+        If(cexpr, stmt, _) => {
+            check_expr(cexpr, &sg)?.if_bool(check_stmt(stmt, sg)?)?;
+        }
+        IfElse(cexpr, tstmt, fstmt, _) => {
+            check_expr(cexpr, &sg)?.if_bool({
                 check_stmt(tstmt, sg)?;
-                check_stmt(fstmt, sg)
-            } else {
-                Err(TypeError::TypeIncompatible)
-            }
+                check_stmt(fstmt, sg)?;
+            })?;
         }
-        Stmt::While(cexpr, stmt) => {
-            if check_expr(cexpr, &sg)?.becomes(ATyp::Bool) {
-                check_stmt(stmt, sg)
-            } else {
-                Err(TypeError::TypeIncompatible)
-            }
+        While(cexpr, stmt, _) => {
+            check_expr(cexpr, &sg)?.if_bool(check_stmt(stmt, sg)?)?;
         }
-        Stmt::DoWhile(stmt, cexpr) => {
-            if check_expr(cexpr, &sg)?.becomes(ATyp::Bool) {
-                check_stmt(stmt, sg)
-            } else {
-                Err(TypeError::TypeIncompatible)
-            }
+        DoWhile(stmt, cexpr, _) => {
+            check_expr(cexpr, &sg)?.if_bool(check_stmt(stmt, sg)?)?;
         }
-        Stmt::Continue => Ok(()),
-        Stmt::Break => Ok(()),
-        Stmt::Return(opt_expr) => {
+        Continue(_) => (),
+        Break(_) => (),
+        Return(opt_expr, _) => {
             let rettyp = sg.get_rettyp();
             let valtyp = if let Some(expr) = opt_expr {
                 check_expr(expr, sg)?
             } else {
-                Typ::Void
+                Void
             };
-            if valtyp.becomes(rettyp) {
-                Ok(())
-            } else {
-                Err(TypeError::TypeIncompatible)
-            }
+            if !valtyp.becomes(rettyp) {
+                return Err(TypeError::TypeMismatch(
+                    "Return type mismatch".to_owned(),
+                    rettyp.clone(),
+                    valtyp,
+                )
+                .into());
+            };
         }
-        Stmt::For(iexpr, cexpr, rexpr, stmt) => {
+        For(iexpr, cexpr, rexpr, stmt, _) => {
             if let Some(expr) = iexpr {
                 check_expr(expr, sg)?;
             }
             if let Some(expr) = cexpr {
-                if !check_expr(expr, sg)?.becomes(ATyp::Bool) {
-                    return Err(TypeError::TypeIncompatible);
+                if !check_expr(expr, sg)?.becomes(Bool) {
+                    return Err(TypeError::TypeIncompatible.into());
                 }
             }
             if let Some(expr) = rexpr {
                 check_expr(expr, sg)?;
             }
-            check_stmt(stmt, sg)
+            check_stmt(stmt, sg)?;
         }
-    }
+    };
+    Ok(())
+}
+
+fn check_stmt(stmt: &Stmt, sg: &ScopeGuard) -> TypeResult<()> {
+    let res = match check_stmt_inner(stmt, sg) {
+        Ok(i) => Ok(i),
+        Err(mut err) => {
+            err.at(stmt.clone());
+            Err(err)
+        }
+    };
+    res
 }
 
 fn check_cstmt(
     cstmt: &CompoundStmt,
     outer_sg: &ScopeGuard,
-    reason: &'static str,
+    scope_nm: &'static str,
 ) -> TypeResult<()> {
-    check_cstmt_with_sg(cstmt, outer_sg.scope_in(reason))
+    check_cstmt_with_sg(cstmt, outer_sg.scope_in(scope_nm))
 }
 
 fn check_cstmt_with_sg(cstmt: &CompoundStmt, mut use_this_sg: ScopeGuard) -> TypeResult<()> {
     let CompoundStmt(decls, stmts) = cstmt;
 
     for decln in decls {
-        let Declaration(ptype, decls) = decln;
-        for decl in decls {
-            check_decl(ptype, decl, &mut use_this_sg)?;
-        }
+        check_declaration(decln, &mut use_this_sg)?;
     }
 
     for stmt in stmts {
@@ -95,13 +102,11 @@ fn check_cstmt_with_sg(cstmt: &CompoundStmt, mut use_this_sg: ScopeGuard) -> Typ
 }
 
 fn check_init(init: &Initializer, tgt: &Typ, sg: &ScopeGuard) -> TypeResult<()> {
-    match init {
+    let res = match init {
         Initializer::Array(inits) => {
-            if let Typ::Array(ityp, sz) = tgt {
+            if let Array(ityp, sz) = tgt {
                 if inits.len() > *sz as usize {
-                    Err(TypeError::InvalidDefinition(
-                        "Too many initial values".to_owned(),
-                    ))
+                    Err(TypeError::InvalidDefinition("Too many initial values".to_owned()).into())
                 } else {
                     for init in inits.iter() {
                         check_init(init, ityp, sg)?;
@@ -109,9 +114,7 @@ fn check_init(init: &Initializer, tgt: &Typ, sg: &ScopeGuard) -> TypeResult<()> 
                     Ok(())
                 }
             } else {
-                Err(TypeError::InvalidDefinition(
-                    "Invalid array initialization".to_owned(),
-                ))
+                Err(TypeError::InvalidDefinition("Invalid array initialization".to_owned()).into())
             }
         }
         Initializer::Scala(expr) => {
@@ -120,72 +123,111 @@ fn check_init(init: &Initializer, tgt: &Typ, sg: &ScopeGuard) -> TypeResult<()> 
             if typ == tgt {
                 Ok(())
             } else {
-                Err(TypeError::TypeMismatch(tgt, typ))
+                Err(TypeError::TypeMismatch("".to_owned(), tgt, typ).into())
             }
         }
-    }
+    };
+    res
 }
 
 fn check_decl(ptyp: &PrimType, decl: &Declarator, sg: &mut ScopeGuard) -> TypeResult<()> {
     let nm = decl.name();
-    let typ = Typ::from_decl(ptyp, decl);
+    let typ = decl.to_typ(ptyp);
+    use Declarator::*;
     match decl {
-        Declarator::Init(_, _, init) => {
+        Init(_, _, init) => {
             check_init(init, &typ, &sg)?;
             sg.declare(nm, typ)?;
         }
-        Declarator::NoInit(_, _) => {
+        NoInit(_, _) => {
             sg.declare(nm, typ)?;
         }
     };
     Ok(())
 }
 
-fn check_tu(tu: &TranslationUnit, root_sg: &mut ScopeGuard) -> TypeResult<()> {
-    match tu {
-        TranslationUnit::Glob(Declaration(typ, decls)) => {
-            for decl in decls {
-                check_decl(typ, decl, root_sg)?;
-            }
-            Ok(())
+fn check_declaration(decln: &Declaration, sg: &mut ScopeGuard) -> TypeResult<()> {
+    let Declaration(ptype, decls, _) = decln;
+
+    let mut res = Ok(());
+    for decl in decls {
+        if let Err(mut err) = check_decl(ptype, decl, sg) {
+            err.at(decln.clone());
+            res = Err(err);
+            break;
         }
-        TranslationUnit::Func(Function(ptype, decl, cstmt)) => {
+    }
+    res
+}
+
+fn check_tu(tu: &TranslationUnit, root_sg: &mut ScopeGuard) -> TypeResult<()> {
+    use TranslationUnit::*;
+    match tu {
+        Glob(decln) => check_declaration(decln, root_sg),
+        Func(Function(ptype, decl, cstmt)) => {
             let func_nm = decl.name();
-            let func_typ = Typ::from_decl(ptype, decl);
+            let func_typ = decl.to_typ(ptype);
 
-            if let Declarator::NoInit(_, DirectDeclarator::Func(_, pdds)) = decl {
-                let params: Vec<(Typ, &String)> = pdds
-                    .iter()
-                    .map(|pdd| {
-                        let ParamDeclaration(ptype, decl) = pdd;
-                        (Typ::from_decl(ptype, decl), decl.name())
-                    })
-                    .collect();
-
-                // Declare function name for recursion
-                root_sg.declare(func_nm, func_typ.clone())?;
-                let mut inner_sg = root_sg.scope_in(func_nm);
-
-                if let Typ::FuncDecl(rettyp, _) = func_typ {
-                    inner_sg.set_rettyp(*rettyp);
-                    for (ptype, pname) in params.into_iter() {
-                        inner_sg.declare(&pname, ptype)?;
-                    }
-
-                    check_cstmt_with_sg(cstmt, inner_sg)?;
-                    Ok(())
+            if let Some(etyp) = root_sg.get_type(func_nm) {
+                if etyp == func_typ {
                 } else {
-                    Err(TypeError::InvalidDefinition(func_nm.to_owned()))
+                    return Err(TypeError::TypeMismatch(
+                        "Incompatible prototype".to_owned(),
+                        etyp,
+                        func_typ,
+                    )
+                    .into());
                 }
             } else {
-                Err(TypeError::InvalidDefinition(func_nm.to_owned()))
+                root_sg.declare(func_nm, func_typ.clone())?;
+            }
+
+            if let Declarator::NoInit(_, ddbox) = decl {
+                if let DirectDeclarator::Func(_, pdds) = ddbox.as_ref() {
+                    let params: Vec<(Typ, Option<&String>)> = pdds
+                        .iter()
+                        .map(|pdd| match pdd {
+                            ParamDeclaration::Abstract(ptype, decl) => (decl.to_typ(ptype), None),
+                            ParamDeclaration::Named(ptype, decl) => {
+                                (decl.to_typ(ptype), Some(decl.name()))
+                            }
+                        })
+                        .collect();
+
+                    let mut inner_sg = root_sg.scope_in(func_nm);
+                    if let FuncDecl(rettyp, _) = func_typ {
+                        inner_sg.set_rettyp(*rettyp);
+                        for (ptype, pname) in params.into_iter() {
+                            if let Some(pname) = pname {
+                                inner_sg.declare(&pname, ptype)?;
+                            }
+                        }
+                        check_cstmt_with_sg(cstmt, inner_sg)?;
+                        Ok(())
+                    } else {
+                        Err(
+                            TypeError::InvalidDefinition(format!("Must be function: {}", func_nm))
+                                .into(),
+                        )
+                    }
+                } else {
+                    Err(
+                        TypeError::InvalidDefinition(format!("Must be function: {}", func_nm))
+                            .into(),
+                    )
+                }
+            } else {
+                Err(
+                    TypeError::InvalidDefinition(format!("Cannot be init declarator: {}", func_nm))
+                        .into(),
+                )
             }
         }
     }
 }
 
 pub fn check(tus: &Vec<TranslationUnit>) -> TypeResult<()> {
-    let mut root_sg = ScopeGuard::new("root", true);
+    let mut root_sg = ScopeGuard::new("root", false);
     for tu in tus {
         check_tu(tu, &mut root_sg)?;
     }

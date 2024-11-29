@@ -1,8 +1,9 @@
 [package]
-name = "cs420-peg"
+name = "cs420_peg"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 bitvec = "1.0.1"
 peg = "0.8.4"
+ast_printer = { path="../ast_printer" }

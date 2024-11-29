@@ -1,48 +1,68 @@
-use crate::ast::*;
+use crate::ast::expr::*;
+use crate::ast::types::*;
 
 use crate::types::defs::*;
 use crate::types::scope::ScopeGuard;
 
+use crate::types::defs::ATyp::*;
+use crate::types::defs::Typ::*;
+
 fn check_lval(expr: &Expr, sg: &ScopeGuard) -> TypeResult<Option<Typ>> {
     match expr {
         Expr::LUnop(LeftUnaryOp::Ref, iexpr) => {
-            if let Typ::Address(inner) = check_expr(iexpr, sg)? {
+            if let Address(inner) = check_expr(iexpr, sg)? {
                 Ok(Some(*inner))
             } else {
-                Err(TypeError::TypeIncompatible)
+                Err(TypeError::TypeIncompatible.into())
             }
         }
         Expr::Index(arr, idx) => {
-            if let Typ::Array(elemtyp, _) = check_expr(arr, sg)? {
-                if let Typ::Arith(ATyp::Int(_, _)) = check_expr(idx, sg)? {
+            if let Array(elemtyp, _) = check_expr(arr, sg)? {
+                if let Arith(Int(_, _)) = check_expr(idx, sg)? {
                     Ok(Some(*elemtyp))
                 } else {
-                    Err(TypeError::TypeIncompatible)
+                    Err(TypeError::TypeIncompatible.into())
                 }
             } else {
-                Err(TypeError::TypeIncompatible)
+                Err(TypeError::TypeIncompatible.into())
             }
         }
         Expr::Ternary(bexpr, texpr, fexpr) => {
             let btyp = check_expr(bexpr, sg)?;
-            if btyp.becomes(ATyp::Bool) {
+            if btyp.becomes(Bool) {
                 let ttyp = check_lval(texpr, sg)?;
                 let ftyp = check_lval(fexpr, sg)?;
                 if let (Some(ttyp), Some(ftyp)) = (ttyp, ftyp) {
                     if ttyp == ftyp {
                         Ok(Some(ttyp))
                     } else {
-                        Err(TypeError::TypeIncompatible)
+                        Err(TypeError::TypeIncompatible.into())
                     }
                 } else {
-                    Err(TypeError::TypeIncompatible)
+                    Err(TypeError::TypeIncompatible.into())
                 }
             } else {
-                Err(TypeError::TypeIncompatible)
+                Err(TypeError::TypeIncompatible.into())
             }
         }
         Expr::Comma(_, nxt) => check_lval(nxt, sg),
         _ => Ok(None),
+    }
+}
+
+fn check_params(atyps: Vec<Typ>, ptyps: Vec<Typ>) -> TypeResult<()> {
+    if atyps.len() != ptyps.len() {
+        Err(TypeError::TypesMismatch("Different length".to_owned(), atyps, ptyps).into())
+    } else {
+        if atyps
+            .iter()
+            .zip(ptyps.iter())
+            .all(|(atyp, ptyp)| atyp.becomes(ptyp))
+        {
+            Ok(())
+        } else {
+            Err(TypeError::TypesMismatch("Incompatible types".to_owned(), atyps, ptyps).into())
+        }
     }
 }
 
@@ -53,73 +73,79 @@ pub fn check_expr(expr: &Expr, sg: &ScopeGuard) -> TypeResult<Typ> {
         | Expr::LUnop(LeftUnaryOp::Inc | LeftUnaryOp::Dec, iexpr) => {
             if let Some(ityp) = check_lval(iexpr, sg)? {
                 match ityp {
-                    Typ::Address(_) => Ok(ityp),
-                    Typ::Arith(atyp) => {
+                    Address(_) => Ok(ityp),
+                    Arith(atyp) => {
                         let after_promotion = atyp.promote().into();
                         // use of an operand of type ‘bool’ in ‘operator++’ is forbidden
                         match atyp {
-                            ATyp::Float(_) => Ok(after_promotion),
-                            ATyp::Int(_, _) => Ok(after_promotion),
-                            ATyp::Bool => Err(TypeError::TypeIncompatible),
+                            Float(_) => Ok(after_promotion),
+                            Int(_, _) => Ok(after_promotion),
+                            Bool => Err(TypeError::TypeIncompatible.into()),
                         }
                     }
-                    _ => Err(TypeError::TypeIncompatible),
+                    _ => Err(TypeError::TypeIncompatible.into()),
                 }
             } else {
-                Err(TypeError::TypeIncompatible)
+                Err(TypeError::TypeIncompatible.into())
             }
         }
-        Expr::Call(fexpr, pexprs) => {
-            let atyps = pexprs
+        Expr::Cast(TypeName(ptyp, adecl), _expr) => Ok(adecl.to_typ(ptyp)),
+        Expr::Call(fexpr, aexprs) => {
+            let atyps = aexprs
                 .iter()
                 .map(|e| check_expr(e, sg))
-                .collect::<Result<Vec<Typ>, TypeError>>()?;
-            if let Typ::FuncDecl(rettyp, ptyps) = check_expr(fexpr, sg)? {
-                if atyps == ptyps {
-                    Ok(*rettyp)
+                .collect::<Result<Vec<Typ>, PositionalTypeError>>()?;
+
+            let ftyp = check_expr(fexpr, sg)?;
+
+            if let FuncDecl(rettyp, ptyps) = ftyp {
+                check_params(atyps, ptyps).map(|_| *rettyp)
+            } else if let Address(boxed) = ftyp.clone() {
+                if let FuncDecl(rettyp, ptyps) = *boxed {
+                    check_params(atyps, ptyps).map(|_| *rettyp)
                 } else {
-                    Err(TypeError::TypeIncompatible)
+                    Err(TypeError::NotCallable(ftyp).into())
                 }
             } else {
-                Err(TypeError::TypeIncompatible)
+                Err(TypeError::NotCallable(ftyp).into())
             }
         }
         // arr[idx] is same with *(arr+idx)
         Expr::Index(aexpr, iexpr) => match check_expr(iexpr, sg)? {
-            Typ::Arith(ATyp::Bool | ATyp::Int(_, _)) => {
-                if let Typ::Array(e, _) = check_expr(aexpr, sg)? {
+            Arith(Bool | Int(_, _)) => {
+                if let Array(e, _) = check_expr(aexpr, sg)? {
                     Ok(*e)
                 } else {
-                    Err(TypeError::TypeIncompatible)
+                    Err(TypeError::TypeIncompatible.into())
                 }
             }
-            _ => Err(TypeError::TypeIncompatible),
+            _ => Err(TypeError::TypeIncompatible.into()),
         },
         Expr::LUnop(lunop, iexpr) => {
             let ityp = check_expr(iexpr, sg)?;
 
             match lunop {
                 LeftUnaryOp::Plus | LeftUnaryOp::Minus => match ityp {
-                    Typ::Arith(atyp) => Ok(Typ::Arith(atyp.promote())),
-                    _ => Err(TypeError::TypeIncompatible),
+                    Arith(atyp) => Ok(Arith(atyp.promote())),
+                    _ => Err(TypeError::TypeIncompatible.into()),
                 },
                 LeftUnaryOp::BoolNot => {
-                    if ityp.becomes(ATyp::Bool) {
+                    if ityp.becomes(Bool) {
                         Ok(ityp)
                     } else {
-                        Err(TypeError::TypeIncompatible)
+                        Err(TypeError::TypeIncompatible.into())
                     }
                 }
                 LeftUnaryOp::BitNot => match ityp {
-                    Typ::Arith(ATyp::Int(_, _)) => Ok(ityp),
-                    _ => Err(TypeError::TypeIncompatible),
+                    Arith(Int(_, _)) => Ok(ityp),
+                    _ => Err(TypeError::TypeIncompatible.into()),
                 },
-                LeftUnaryOp::Deref => Ok(Typ::Address(Box::new(ityp))),
+                LeftUnaryOp::Deref => Ok(Address(Box::new(ityp))),
                 LeftUnaryOp::Ref => {
-                    if let Typ::Address(i) = ityp {
+                    if let Address(i) = ityp {
                         Ok(*i)
                     } else {
-                        Err(TypeError::TypeIncompatible)
+                        Err(TypeError::TypeIncompatible.into())
                     }
                 }
                 LeftUnaryOp::Inc | LeftUnaryOp::Dec => unreachable!("Already covered"),
@@ -131,68 +157,62 @@ pub fn check_expr(expr: &Expr, sg: &ScopeGuard) -> TypeResult<Typ> {
             match binop {
                 // Valid with all arithmetic types
                 BinOp::Mul | BinOp::Div => match (ltyp, rtyp) {
-                    (Typ::Arith(lat), Typ::Arith(rat)) => Ok((lat + rat).into()),
-                    _ => Err(TypeError::TypeIncompatible),
+                    (Arith(lat), Arith(rat)) => Ok((lat + rat).into()),
+                    _ => Err(TypeError::TypeIncompatible.into()),
                 },
                 // Only i % i
                 BinOp::Mod => match (ltyp, rtyp) {
-                    (Typ::Arith(lat @ ATyp::Int(_, _)), Typ::Arith(rat @ ATyp::Int(_, _))) => {
-                        Ok((lat + rat).into())
+                    (Arith(lat @ Int(_, _)), Arith(rat @ Int(_, _))) => Ok((lat + rat).into()),
+                    _ => Err(TypeError::TypeIncompatible.into()),
+                },
+                BinOp::Add | BinOp::Sub => {
+                    match (ltyp, rtyp) {
+                        // ARITH + ARITH
+                        (Arith(lat), Arith(rat)) => Ok((lat + rat).into()),
+                        // p+i | i+p
+                        (Arith(Int(_, _)), it @ Address(_))
+                        | (it @ Address(_), Arith(Int(_, _))) => Ok(it),
+                        // arr+i | i+arr
+                        (Arith(Int(_, _)), at @ Array(_, _))
+                        | (at @ Array(_, _), Arith(Int(_, _))) => Ok(at),
+                        _ => Err(TypeError::TypeIncompatible.into()),
                     }
-                    _ => Err(TypeError::TypeIncompatible),
-                },
-                BinOp::Add | BinOp::Sub => match (ltyp, rtyp) {
-                    // ARITH + ARITH
-                    (Typ::Arith(lat), Typ::Arith(rat)) => Ok((lat + rat).into()),
-                    // p+i | i+p
-                    (Typ::Arith(ATyp::Int(_, _)), it @ Typ::Address(_))
-                    | (it @ Typ::Address(_), Typ::Arith(ATyp::Int(_, _))) => Ok(it),
-                    // arr+i | i+arr
-                    (Typ::Arith(ATyp::Int(_, _)), at @ Typ::Array(_, _))
-                    | (at @ Typ::Array(_, _), Typ::Arith(ATyp::Int(_, _))) => Ok(at),
-                    _ => Err(TypeError::TypeIncompatible),
-                },
+                }
                 // Only i >> i, i << i
                 BinOp::ShftL | BinOp::ShftR => match (ltyp, rtyp) {
-                    (Typ::Arith(lat @ ATyp::Int(_, _)), Typ::Arith(rat @ ATyp::Int(_, _))) => {
-                        Ok((lat + rat).into())
-                    }
-                    _ => Err(TypeError::TypeIncompatible),
+                    (Arith(lat @ Int(_, _)), Arith(rat @ Int(_, _))) => Ok((lat + rat).into()),
+                    _ => Err(TypeError::TypeIncompatible.into()),
                 },
                 BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::Eq | BinOp::Ne => {
                     if match (ltyp, rtyp) {
-                        (Typ::Arith(ATyp::Int(_, _)), Typ::Arith(ATyp::Int(_, _))) => true,
-                        (ptrtyp @ Typ::Address(_), arrtyp @ Typ::Array(_, _))
-                        | (arrtyp @ Typ::Array(_, _), ptrtyp @ Typ::Address(_)) => {
-                            arrtyp.becomes(&ptrtyp)
-                        }
-                        (Typ::Address(la), Typ::Address(ra)) => la == ra,
-                        (Typ::Array(la, _), Typ::Array(ra, _)) => la == ra,
+                        (Arith(Int(_, _)), Arith(Int(_, _))) => true,
+                        (ptrtyp @ Address(_), arrtyp @ Array(_, _))
+                        | (arrtyp @ Array(_, _), ptrtyp @ Address(_)) => arrtyp.becomes(&ptrtyp),
+                        (Address(la), Address(ra)) => la == ra,
+                        (Array(la, _), Array(ra, _)) => la == ra,
                         _ => false,
                     } {
-                        Ok(ATyp::Bool.into())
+                        Ok(Bool.into())
                     } else {
-                        Err(TypeError::TypeIncompatible)
+                        Err(TypeError::TypeIncompatible.into())
                     }
                 }
                 BinOp::BitAnd | BinOp::BitXor | BinOp::BitOr => match (ltyp, rtyp) {
-                    (Typ::Arith(lat @ ATyp::Int(_, _)), Typ::Arith(rat @ ATyp::Int(_, _))) => {
-                        Ok((lat + rat).into())
-                    }
-                    _ => Err(TypeError::TypeIncompatible),
+                    (Arith(lat @ Int(_, _)), Arith(rat @ Int(_, _))) => Ok((lat + rat).into()),
+                    _ => Err(TypeError::TypeIncompatible.into()),
                 },
 
                 BinOp::BoolAnd | BinOp::BoolOr => {
-                    if ltyp.becomes(ATyp::Bool) && rtyp.becomes(ATyp::Bool) {
-                        Ok(ATyp::Bool.into())
+                    if ltyp.becomes(Bool) && rtyp.becomes(Bool) {
+                        Ok(Bool.into())
                     } else {
-                        Err(TypeError::TypeIncompatible)
+                        Err(TypeError::TypeIncompatible.into())
                     }
                 }
             }
         }
         Expr::Ternary(cond, tb, fb) => {
-            if check_expr(cond, sg)?.becomes(ATyp::Bool) {
+            if check_expr(cond, sg)?.becomes(Bool) {
                 let tt = check_expr(tb, sg)?;
                 let ft = check_expr(fb, sg)?;
                 if tt == ft {
@@ -202,10 +222,10 @@ pub fn check_expr(expr: &Expr, sg: &ScopeGuard) -> TypeResult<Typ> {
                 } else if ft.becomes(&tt) {
                     Ok(tt)
                 } else {
-                    Err(TypeError::TypeIncompatible)
+                    Err(TypeError::TypeIncompatible.into())
                 }
             } else {
-                Err(TypeError::TypeIncompatible)
+                Err(TypeError::TypeIncompatible.into())
             }
         }
         Expr::Assign(lexpr, assop, rexpr) => {
@@ -214,21 +234,26 @@ pub fn check_expr(expr: &Expr, sg: &ScopeGuard) -> TypeResult<Typ> {
                     Some(binop) => Expr::Binop(lexpr.clone(), binop, rexpr.clone()),
                     None => *rexpr.clone(),
                 };
-                let asstyp = check_expr(&assexpr, sg)?;
-                if asstyp.becomes(&tgttyp) {
+                if check_expr(&assexpr, sg)?.becomes(&tgttyp) {
                     Ok(tgttyp)
                 } else {
-                    Err(TypeError::TypeIncompatible)
+                    Err(TypeError::TypeIncompatible.into())
                 }
             } else {
-                Err(TypeError::TypeIncompatible)
+                Err(TypeError::TypeIncompatible.into())
             }
         }
         Expr::Comma(_, i) => check_expr(i, sg),
-        Expr::Ident(nm) => sg.get_type(nm),
+        Expr::Ident(nm) => {
+            if let Some(typ) = sg.get_type(nm) {
+                Ok(typ)
+            } else {
+                Err(TypeError::InvalidIdentifier(nm.to_owned()).into())
+            }
+        }
         c @ (Expr::Const(_) | Expr::ConstFloat(_) | Expr::ConstBool(_)) => {
             Ok(Typ::from_constexpr(c))
         }
-        Expr::StringLiteral(_) => Ok(Typ::Address(Box::new(ATyp::Int(true, 1).into()))),
+        Expr::StringLiteral(_) => Ok(Address(Box::new(Int(true, 1).into()))),
     }
 }
