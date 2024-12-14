@@ -50,7 +50,7 @@ peg::parser!(pub grammar clang() for str {
     }
     rule ident() -> String = quiet!{
         !reserved()
-        s:$(['a'..='z' | 'A'..='Z']['0'..='9' | 'a'..='z' | 'A'..='Z']*) {
+        s:$(['a'..='z' | 'A'..='Z' | '_']['0'..='9' | 'a'..='z' | 'A'..='Z' | '_']*) {
             s.to_owned()
         }
     }

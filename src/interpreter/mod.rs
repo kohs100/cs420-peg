@@ -11,7 +11,6 @@ pub type IpretResult<T> = Result<T, IpretError>;
 
 #[derive(Debug, Clone)]
 pub enum IpretError {
-    Unimplemented,
     Misc(&'static str),
     MiscOwned(String),
 }
@@ -19,9 +18,8 @@ pub enum IpretError {
 impl Display for IpretError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unimplemented => write!(f, "Interpreter error: Not implemented"),
-            Self::Misc(msg) => write!(f, "Interpreter error: Misc: {}", msg),
-            Self::MiscOwned(msg) => write!(f, "Interpreter error: Misc: {}", msg),
+            Self::Misc(msg) => write!(f, "Interpreter error: {}", msg),
+            Self::MiscOwned(msg) => write!(f, "Interpreter error: {}", msg),
         }
     }
 }

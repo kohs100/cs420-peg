@@ -10,7 +10,7 @@ use crate::ast::types::*;
 use super::defs::*;
 use super::runtime::*;
 
-use super::IpretError::{Misc, MiscOwned, Unimplemented};
+use super::IpretError::{Misc, MiscOwned};
 use super::IpretResult;
 
 fn do_incdec<T: Allocator + VirtualMemory>(
@@ -19,8 +19,7 @@ fn do_incdec<T: Allocator + VirtualMemory>(
     is_inc: bool,
     sg: &mut StackGuard<T>,
 ) -> IpretResult<Value> {
-    let val = interp_expr(operand, sg)?;
-    if let Some(mo) = val.unwrap_memobj() {
+    if let Some(mo) = interp_expr(operand, sg)?.unwrap_memobj() {
         let val = mo.load(sg);
 
         let val_incdec = if is_inc {
@@ -30,7 +29,7 @@ fn do_incdec<T: Allocator + VirtualMemory>(
         };
 
         Ok(if return_prev {
-            mo.store(sg, val_incdec);
+            mo.store(sg, val_incdec.cast_into(&mo.typ, false)?);
             val.into()
         } else {
             mo.store(sg, val_incdec.clone());
