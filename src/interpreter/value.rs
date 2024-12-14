@@ -600,14 +600,7 @@ macro_rules! coerce {
     }};
 }
 
-macro_rules! coerce_bool {
-    ($lhs:expr, $op:tt, $rhs:expr, $rtyp:ty) => {{
-        let v: bool = ($lhs).get_as::<$rtyp>() $op ($rhs).get_as::<$rtyp>();
-        ivalue!(v, ATyp::Bool, bool)
-    }};
-}
-
-macro_rules! define_cmp {
+macro_rules! define_int_binop {
     ($lhs:expr, $op:tt, $rhs:expr) => {{
         let lhs = $lhs;
         let rhs = $rhs;
@@ -616,31 +609,29 @@ macro_rules! define_cmp {
                 let (lhs, rhs) = do_usual_arithmetic_conversion(lhs, rhs)?;
                 assert_eq!(&lhs.typ, &rhs.typ);
                 use ATyp::*;
-                use FTyp::*;
                 use ITyp::*;
-                if let Typ::Arith(Float(ftyp)) = lhs.typ {
-                    Ok(match ftyp {
-                        F32 => coerce_bool!(lhs, $op, rhs, f32),
-                        F64 => coerce_bool!(lhs, $op, rhs, f64),
-                    })
+                if let Typ::Arith(Float(_)) = lhs.typ {
+                    Err(MiscOwned(format!(
+                        "{} operation for floating points are not defined",
+                        stringify!($op)
+                    )))
                 } else if let Typ::Arith(Int(ityp)) = lhs.typ {
                     Ok(match ityp {
-                        I32 => coerce_bool!(lhs, $op, rhs, i32),
-                        I64 => coerce_bool!(lhs, $op, rhs, i64),
-                        U32 => coerce_bool!(lhs, $op, rhs, u32),
-                        U64 => coerce_bool!(lhs, $op, rhs, u64),
+                        I32 => coerce!(lhs, $op, rhs, i32, ityp),
+                        I64 => coerce!(lhs, $op, rhs, i64, ityp),
+                        U32 => coerce!(lhs, $op, rhs, u32, ityp),
+                        U64 => coerce!(lhs, $op, rhs, u64, ityp),
                         _ => unreachable!(),
                     })
                 } else {
                     unreachable!()
                 }
             }
-            (Typ::Address(_) | Typ::Array(_, _), Typ::Address(_) | Typ::Array(_, _)) => {
-                Ok(coerce_bool!(lhs, $op, rhs, AddrType))
-            }
             _ => Err(MiscOwned(format!(
-                "Invalid type for {} - {}",
-                lhs.typ, rhs.typ
+                "Invalid type for {} {} {}",
+                lhs.typ,
+                stringify!($op),
+                rhs.typ
             ))),
         }
     }};
@@ -784,6 +775,92 @@ impl InterValue {
         }
     }
 
+    pub fn modulo(self, rhs: InterValue) -> IpretResult<InterValue> {
+        define_int_binop!(self, %, rhs)
+    }
+
+    pub fn shftl(self, rhs: InterValue) -> IpretResult<InterValue> {
+        define_int_binop!(self, <<, rhs)
+    }
+
+    pub fn shftr(self, rhs: InterValue) -> IpretResult<InterValue> {
+        define_int_binop!(self, >>, rhs)
+    }
+
+    pub fn bitand(self, rhs: InterValue) -> IpretResult<InterValue> {
+        define_int_binop!(self, &, rhs)
+    }
+
+    pub fn bitxor(self, rhs: InterValue) -> IpretResult<InterValue> {
+        define_int_binop!(self, ^, rhs)
+    }
+
+    pub fn bitor(self, rhs: InterValue) -> IpretResult<InterValue> {
+        define_int_binop!(self, |, rhs)
+    }
+
+    pub fn booland(self, rhs: InterValue) -> IpretResult<InterValue> {
+        let lhs = self.cast_into(&ATyp::Bool.into(), false)?.get_as::<bool>();
+        let rhs = rhs.cast_into(&ATyp::Bool.into(), false)?.get_as::<bool>();
+
+        Ok(InterValue::from_const_bool(lhs && rhs))
+    }
+
+    pub fn boolor(self, rhs: InterValue) -> IpretResult<InterValue> {
+        let lhs = self.cast_into(&ATyp::Bool.into(), false)?.get_as::<bool>();
+        let rhs = rhs.cast_into(&ATyp::Bool.into(), false)?.get_as::<bool>();
+
+        Ok(InterValue::from_const_bool(lhs || rhs))
+    }
+}
+
+macro_rules! coerce_bool {
+    ($lhs:expr, $op:tt, $rhs:expr, $rtyp:ty) => {{
+        let v: bool = ($lhs).get_as::<$rtyp>() $op ($rhs).get_as::<$rtyp>();
+        ivalue!(v, ATyp::Bool, bool)
+    }};
+}
+
+macro_rules! define_cmp {
+    ($lhs:expr, $op:tt, $rhs:expr) => {{
+        let lhs = $lhs;
+        let rhs = $rhs;
+        match (&lhs.typ, &rhs.typ) {
+            (Typ::Arith(_), Typ::Arith(_)) => {
+                let (lhs, rhs) = do_usual_arithmetic_conversion(lhs, rhs)?;
+                assert_eq!(&lhs.typ, &rhs.typ);
+                use ATyp::*;
+                use FTyp::*;
+                use ITyp::*;
+                if let Typ::Arith(Float(ftyp)) = lhs.typ {
+                    Ok(match ftyp {
+                        F32 => coerce_bool!(lhs, $op, rhs, f32),
+                        F64 => coerce_bool!(lhs, $op, rhs, f64),
+                    })
+                } else if let Typ::Arith(Int(ityp)) = lhs.typ {
+                    Ok(match ityp {
+                        I32 => coerce_bool!(lhs, $op, rhs, i32),
+                        I64 => coerce_bool!(lhs, $op, rhs, i64),
+                        U32 => coerce_bool!(lhs, $op, rhs, u32),
+                        U64 => coerce_bool!(lhs, $op, rhs, u64),
+                        _ => unreachable!(),
+                    })
+                } else {
+                    unreachable!()
+                }
+            }
+            (Typ::Address(_) | Typ::Array(_, _), Typ::Address(_) | Typ::Array(_, _)) => {
+                Ok(coerce_bool!(lhs, $op, rhs, AddrType))
+            }
+            _ => Err(MiscOwned(format!(
+                "Invalid type for {} - {}",
+                lhs.typ, rhs.typ
+            ))),
+        }
+    }};
+}
+
+impl InterValue {
     pub fn lt(self, rhs: InterValue) -> IpretResult<InterValue> {
         define_cmp!(self, <, rhs)
     }

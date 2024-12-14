@@ -6,7 +6,6 @@ use super::value::*;
 use super::vptr::*;
 use crate::ast::expr::*;
 use crate::ast::types::*;
-use crate::interpreter::IpretError;
 
 use super::defs::*;
 use super::runtime::*;
@@ -236,15 +235,22 @@ fn interp_expr<T: Allocator + VirtualMemory>(
             let res = match binop {
                 BinOp::Mul => lval.mul(rval),
                 BinOp::Div => lval.div(rval),
+                BinOp::Mod => lval.modulo(rval),
                 BinOp::Add => lval.add(rval),
                 BinOp::Sub => lval.sub(rval),
+                BinOp::ShftL => lval.shftl(rval),
+                BinOp::ShftR => lval.shftr(rval),
                 BinOp::Lt => lval.lt(rval),
                 BinOp::Le => lval.le(rval),
                 BinOp::Gt => lval.gt(rval),
                 BinOp::Ge => lval.ge(rval),
                 BinOp::Eq => lval.eq(rval),
                 BinOp::Ne => lval.ne(rval),
-                _ => Err(Unimplemented),
+                BinOp::BitAnd => lval.bitand(rval),
+                BinOp::BitXor => lval.bitxor(rval),
+                BinOp::BitOr => lval.bitor(rval),
+                BinOp::BoolAnd => lval.booland(rval),
+                BinOp::BoolOr => lval.boolor(rval),
             };
             Ok(res?.into())
         }
@@ -263,9 +269,14 @@ fn interp_expr<T: Allocator + VirtualMemory>(
                     AssOp::Non => Ok(rval),
                     AssOp::Mul => lval.mul(rval),
                     AssOp::Div => lval.div(rval),
+                    AssOp::Mod => lval.modulo(rval),
                     AssOp::Add => lval.add(rval),
                     AssOp::Sub => lval.sub(rval),
-                    _ => Err(Unimplemented),
+                    AssOp::ShftL => lval.shftl(rval),
+                    AssOp::ShftR => lval.shftr(rval),
+                    AssOp::BitAnd => lval.bitand(rval),
+                    AssOp::BitXor => lval.bitxor(rval),
+                    AssOp::BitOr => lval.bitor(rval),
                 }?
                 .cast_into(&mo.typ, false)?;
 
@@ -509,8 +520,8 @@ fn interp_declaration<T: Allocator + VirtualMemory>(
                 .cast_into(&mo.typ, false)?;
             mo.store(sg, ival)
         }
-        Initializer::Array(inits) => {
-            unimplemented!()
+        Initializer::Array(_) => {
+            unimplemented!("Array initialization is not supported.")
         }
     }
     Ok(())
@@ -546,7 +557,7 @@ pub fn interp_src(src: &Source) -> IpretResult<()> {
         for tu in tus {
             match tu {
                 TranslationUnit::Glob(decln) => {
-                    let Declaration(ptyp, decls, _) = decln;
+                    let Declaration(_, decls, _) = decln;
                     for decl in decls {
                         let name = decl.name().clone();
 

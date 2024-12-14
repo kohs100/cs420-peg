@@ -4,7 +4,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use super::allocator::*;
-use super::defs::{ATyp, ITyp, Typ};
+use super::defs::{ITyp, Typ};
 use super::vptr::*;
 use crate::ast::expr::Function;
 
