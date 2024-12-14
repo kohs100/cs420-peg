@@ -1,8 +1,8 @@
 use ast_printer::DisplayCode;
 
-use crate::ast::expr::*;
-use crate::ast::{print_boxed_commasep, print_commasep};
-use crate::ast::{Code, CodePrinter, CodeResult};
+use super::expr::*;
+use super::{print_boxed_commasep, print_commasep};
+use super::{Code, CodePrinter, CodeResult};
 use std::fmt::Write;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

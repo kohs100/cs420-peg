@@ -1,10 +1,9 @@
 use ast_printer::DisplayCode;
 
-use crate::ast::types::*;
-use crate::ast::{print_boxed_commasep, CodeResult};
+use super::types::*;
+use super::{print_boxed_commasep, CodeResult};
+use super::{Code, CodePrinter};
 use std::fmt::Write;
-
-use crate::ast::{Code, CodePrinter};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum AssOp {
@@ -17,6 +16,8 @@ pub enum AssOp {
     BitAnd,
     BitOr,
     BitXor,
+    ShftL,
+    ShftR,
 }
 impl Code for AssOp {
     fn pretty_fmt(&self, mut cp: CodePrinter) -> Result<CodePrinter, core::fmt::Error> {
@@ -33,6 +34,8 @@ impl Code for AssOp {
                 Self::BitAnd => "&=",
                 Self::BitOr => "|=",
                 Self::BitXor => "^=",
+                Self::ShftL => "<<=",
+                Self::ShftR => ">>=",
             }
         )?;
         Ok(cp)
@@ -50,6 +53,8 @@ impl AssOp {
             Self::BitAnd => Some(BinOp::BitAnd),
             Self::BitOr => Some(BinOp::BitOr),
             Self::BitXor => Some(BinOp::BitXor),
+            Self::ShftL => Some(BinOp::ShftL),
+            Self::ShftR => Some(BinOp::ShftR),
         }
     }
 }
@@ -112,8 +117,8 @@ impl Code for BinOp {
             cp,
             "{}",
             match self {
-                Self::Mul => "+",
-                Self::Div => "-",
+                Self::Mul => "*",
+                Self::Div => "/",
                 Self::Mod => "%",
                 Self::Add => "+",
                 Self::Sub => "-",
@@ -136,7 +141,7 @@ impl Code for BinOp {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, DisplayCode)]
 pub enum Expr {
     UnaryIncRight(Box<Expr>),
     UnaryDecRight(Box<Expr>),
@@ -254,7 +259,7 @@ impl Code for Expr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, DisplayCode)]
 pub struct CompoundStmt(pub Vec<Declaration>, pub Vec<Box<Stmt>>);
 impl Code for CompoundStmt {
     fn pretty_fmt(&self, mut cp: CodePrinter) -> CodeResult {

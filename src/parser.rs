@@ -153,6 +153,8 @@ peg::parser!(pub grammar clang() for str {
         x:@ _ "&=" _ y:(@) { Box::new(Expr::Assign(x, AssOp::BitAnd, y)) }
         x:@ _ "^=" _ y:(@) { Box::new(Expr::Assign(x, AssOp::BitXor, y)) }
         x:@ _ "|=" _ y:(@) { Box::new(Expr::Assign(x, AssOp::BitOr, y)) }
+        x:@ _ "<<=" _ y:(@) { Box::new(Expr::Assign(x, AssOp::ShftL, y)) }
+        x:@ _ ">>=" _ y:(@) { Box::new(Expr::Assign(x, AssOp::ShftR, y)) }
         --
         passthrough:expr_cond() { passthrough }
     }
@@ -253,7 +255,7 @@ peg::parser!(pub grammar clang() for str {
         / begin:position!() "do" ws() s:stmt() _ "(" _ c:expr() _ ")" end:position!() {
             Box::new(Stmt::DoWhile(s, c, Position(begin, end)))
         }
-        / begin:position!() "for" _ "(" _ i:expr()? _ ";" _ c:expr()? _ ";" r:expr()?  _ ")" _ s:stmt() end:position!() {
+        / begin:position!() "for" _ "(" _ i:expr()? _ ";" _ c:expr()? _ ";" _ r:expr()?  _ ")" _ s:stmt() end:position!() {
             Box::new(Stmt::For(i, c, r, s, Position(begin, end)))
         }
         / begin:position!() "return" _ c:expr()? _ ";" end:position!(){
