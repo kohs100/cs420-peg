@@ -25,7 +25,9 @@ $ cargo run -- test/malloc.c
 $ cargo run -- test/WRITE_YOUR_OWN.c
 ```
 
-## Implementation
+## Details
+
+### Implementation
 
 - All stack variable declarations must be present at very first of compound statement.
   - Automatic hoisting is not supported.
@@ -40,8 +42,16 @@ $ cargo run -- test/WRITE_YOUR_OWN.c
 - include is not supported.
   - printf / malloc / free is provided as built-in functions.
   - build-in functions do not print call footprints.
-
-## Details
+- Tried to respect C-style implicit type conversions.
+  - Please refer `src/interpreter/value.rs`
+  - Contextual conversion
+  - Integer / Floating-point type promotion/conversions
+    - Arithmetic types can be implicitly casted each others
+  - Usual arithmetic conversions
+    - Automatic promotion of small integral types to signed int type (32bit in this implementation)
+  - Pointer arithmetic rules
+  - Array-to-pointer decay
+  - Implicit pointer conversion from/into void pointer
 
 ### Memory layout
 
@@ -55,6 +65,7 @@ from `src/interpreter/runtime.rs`:
 
 - `SZ_GLOB` is pre-allocated in pre-runtime phase, thus stack base offset(`OFS_STK`) will also determined before runtime phase.
 - `SZ_STK` is 4MB by default.
-- stack growth direction is upside, not like typical x86 arch.
-- string literals are allocated at heap in runtime.
+- Stack growth direction is upside, not like typical x86 arch.
+- String literals are allocated at heap in runtime.
   - Since there are string literal hashtable, it will be allocated maximum only once, not each time its expression be evaluated.
+- Memory allocators internally manages memory spaces as unit of page (4KB).
