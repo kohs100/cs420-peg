@@ -350,9 +350,31 @@ fn interp_function<T: Allocator + VirtualMemory>(
 
     println!("{}({})", fnm, repr_args.join(", "));
 
+    let is_void = match rettyp.as_ref() {
+        Typ::Void => true,
+        _ => false,
+    };
     match interp_cstmt(cstmt, sg)? {
-        RewindContext::Returning(retval) => retval.cast_into(&rettyp, false),
-        RewindContext::None => InterValue::void().cast_into(&rettyp, false),
+        RewindContext::Returning(retval) => {
+            if is_void {
+                Err(MiscOwned(format!(
+                    "Tried to return {:?} in void function {}",
+                    retval, fnm,
+                )))
+            } else {
+                retval.cast_into(&rettyp, false)
+            }
+        }
+        RewindContext::None => {
+            if is_void {
+                InterValue::void().cast_into(&rettyp, false)
+            } else {
+                Err(MiscOwned(format!(
+                    "Nothing returned in function {}: Must return {}.",
+                    fnm, rettyp
+                )))
+            }
+        }
         rwc => return Err(MiscOwned(format!("Invalid rewind context: {:?}", rwc))),
     }
 }
@@ -459,6 +481,7 @@ fn interp_stmt<T: Allocator + VirtualMemory>(
             }
             loop {
                 if let Some(cexpr) = cexpr {
+                    // println!("STMT FOR cexpr: {}", cexpr);
                     let v = interp_expr(cexpr, sg)?
                         .unwrap_value(sg)
                         .cast_into(&ATyp::Bool.into(), false)?
@@ -467,8 +490,15 @@ fn interp_stmt<T: Allocator + VirtualMemory>(
                         break;
                     }
                 }
-                interp_stmt(stmt, sg)?;
+                // println!("STMT FOR stmt: {}", stmt);
+                match interp_stmt(stmt, sg)? {
+                    RewindContext::Break => break,
+                    RewindContext::Continue => continue,
+                    rwc @ RewindContext::Returning(_) => return Ok(rwc),
+                    RewindContext::None => (),
+                };
                 if let Some(rexpr) = rexpr {
+                    // println!("STMT FOR rexpr: {}", rexpr);
                     interp_expr(rexpr, sg)?;
                 }
             }

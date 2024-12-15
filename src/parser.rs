@@ -104,33 +104,33 @@ peg::parser!(pub grammar clang() for str {
     }
 
     rule expr_binop() -> Box<Expr> = precedence!{
-        x:(@) _ "*" _ y:@ { Box::new(Expr::Binop(x, BinOp::Mul, y)) }
-        x:(@) _ "/" _ y:@ { Box::new(Expr::Binop(x, BinOp::Div, y)) }
-        x:(@) _ "%" _ y:@ { Box::new(Expr::Binop(x, BinOp::Mod, y)) }
+        x:(@) _ "||" _ y:@ { Box::new(Expr::Binop(x, BinOp::BoolOr, y)) }
         --
-        x:(@) _ "+" _ y:@ { Box::new(Expr::Binop(x, BinOp::Add, y)) }
-        x:(@) _ "-" _ y:@ { Box::new(Expr::Binop(x, BinOp::Sub, y)) }
+        x:(@) _ "&&" _ y:@ { Box::new(Expr::Binop(x, BinOp::BoolAnd, y)) }
         --
-        x:(@) _ "<<" _ y:@ { Box::new(Expr::Binop(x, BinOp::ShftL, y)) }
-        x:(@) _ ">>" _ y:@ { Box::new(Expr::Binop(x, BinOp::ShftR, y)) }
+        x:(@) _ "|" _ y:@ { Box::new(Expr::Binop(x, BinOp::BitOr, y)) }
+        --
+        x:(@) _ "^" _ y:@ { Box::new(Expr::Binop(x, BinOp::BitXor, y)) }
+        --
+        x:(@) _ "&" _ y:@ { Box::new(Expr::Binop(x, BinOp::BitAnd, y)) }
+        --
+        x:(@) _ "==" _ y:@ { Box::new(Expr::Binop(x, BinOp::Eq, y)) }
+        x:(@) _ "!=" _ y:@ { Box::new(Expr::Binop(x, BinOp::Ne, y)) }
         --
         x:(@) _ "<" _ y:@ { Box::new(Expr::Binop(x, BinOp::Lt, y)) }
         x:(@) _ ">" _ y:@ { Box::new(Expr::Binop(x, BinOp::Gt, y)) }
         x:(@) _ "<=" _ y:@ { Box::new(Expr::Binop(x, BinOp::Le, y)) }
         x:(@) _ ">=" _ y:@ { Box::new(Expr::Binop(x, BinOp::Ge, y)) }
         --
-        x:(@) _ "==" _ y:@ { Box::new(Expr::Binop(x, BinOp::Eq, y)) }
-        x:(@) _ "!=" _ y:@ { Box::new(Expr::Binop(x, BinOp::Ne, y)) }
+        x:(@) _ "<<" _ y:@ { Box::new(Expr::Binop(x, BinOp::ShftL, y)) }
+        x:(@) _ ">>" _ y:@ { Box::new(Expr::Binop(x, BinOp::ShftR, y)) }
         --
-        x:(@) _ "&" _ y:@ { Box::new(Expr::Binop(x, BinOp::BitAnd, y)) }
+        x:(@) _ "+" _ y:@ { Box::new(Expr::Binop(x, BinOp::Add, y)) }
+        x:(@) _ "-" _ y:@ { Box::new(Expr::Binop(x, BinOp::Sub, y)) }
         --
-        x:(@) _ "^" _ y:@ { Box::new(Expr::Binop(x, BinOp::BitXor, y)) }
-        --
-        x:(@) _ "|" _ y:@ { Box::new(Expr::Binop(x, BinOp::BitOr, y)) }
-        --
-        x:(@) _ "&&" _ y:@ { Box::new(Expr::Binop(x, BinOp::BoolAnd, y)) }
-        --
-        x:(@) _ "||" _ y:@ { Box::new(Expr::Binop(x, BinOp::BoolOr, y)) }
+        x:(@) _ "*" _ y:@ { Box::new(Expr::Binop(x, BinOp::Mul, y)) }
+        x:(@) _ "/" _ y:@ { Box::new(Expr::Binop(x, BinOp::Div, y)) }
+        x:(@) _ "%" _ y:@ { Box::new(Expr::Binop(x, BinOp::Mod, y)) }
         --
         passthrough:expr_cast() { passthrough }
     }

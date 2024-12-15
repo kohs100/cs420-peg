@@ -186,11 +186,12 @@ where
             let addr: AddrType = vptr.into();
             let addr_val: usize = addr.try_into().unwrap();
 
-            let memloc = self.get_bytes_mut(addr_val, bytes.len());
+            let memloc = self.get_bytes_mut(addr_val, nt_str_len);
 
             assert_eq!(memloc.len(), nt_str_len);
 
-            memloc.copy_from_slice(bytes);
+            memloc[..bytes.len()].copy_from_slice(bytes);
+            memloc[bytes.len()] = 0;
 
             if self.strtbl.insert(literal.to_owned(), vptr).is_some() {
                 unreachable!()
