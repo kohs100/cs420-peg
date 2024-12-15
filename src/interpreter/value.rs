@@ -275,15 +275,15 @@ impl InterValue {
                         (false, v.into())
                     }
                     ITyp::U16 => {
-                        let v = self.get_as::<u8>();
+                        let v = self.get_as::<u16>();
                         (false, v.into())
                     }
                     ITyp::U32 => {
-                        let v = self.get_as::<u8>();
+                        let v = self.get_as::<u32>();
                         (false, v.into())
                     }
                     ITyp::U64 => {
-                        let v = self.get_as::<u8>();
+                        let v = self.get_as::<u64>();
                         (false, v.into())
                     }
                 }),
@@ -358,15 +358,10 @@ impl InterValue {
         let res = match (&self.typ, typ) {
             (Typ::Address(src_inner_typ), Typ::Address(dst_inner_typ)) => {
                 // Pointer conversion.
-                // Implicit conversion into/from void pointer.
-                if dst_inner_typ.as_ref() == &Typ::Void {
+                // Implicit conversion from/into void pointer.
+                if dst_inner_typ.as_ref() == &Typ::Void || src_inner_typ.as_ref() == &Typ::Void {
                     Ok(Self {
-                        typ: Typ::Void,
-                        value: self.value,
-                    })
-                } else if src_inner_typ.as_ref() == &Typ::Void {
-                    Ok(Self {
-                        typ: Typ::Void,
+                        typ: Typ::Address(dst_inner_typ.clone()),
                         value: self.value,
                     })
                 } else {

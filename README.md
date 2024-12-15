@@ -20,17 +20,41 @@ $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 $ git clone https://github.com/kohs100/cs420-peg
 $ cd cs420-peg
 $ cargo run -- test/fibo.c
+$ cargo run -- test/string.c
+$ cargo run -- test/malloc.c
+$ cargo run -- test/WRITE_YOUR_OWN.c
 ```
 
 ## Implementation
 
+- All stack variable declarations must be present at very first of compound statement.
+  - Automatic hoisting is not supported.
 - Declaration with initialization is supported.
   - Array initialization is not supported.
 - Main function should have no parameters and must return int type.
 - No complex type specifier (unsigned long, unsigned int, ...).
 - Stack size is limited to 4MB (configurable in code)
 - Function pointer is not supported.
+  - Function names are managed by isolated global namespace.
 - struct / union / typedef not supported.
 - include is not supported.
   - printf / malloc / free is provided as built-in functions.
--
+  - build-in functions do not print call footprints.
+
+## Details
+
+### Memory layout
+
+from `src/interpreter/runtime.rs`:
+
+```
+ |<--- Glob --->|<--------- Stack --------->|------- Heap ------>
+ |0             |OFS_STK                    |OFS_HEAP
+ |       SZ_GLOB|        OFS_STK+SZ_STK(4MB)|
+```
+
+- `SZ_GLOB` is pre-allocated in pre-runtime phase, thus stack base offset(`OFS_STK`) will also determined before runtime phase.
+- `SZ_STK` is 4MB by default.
+- stack growth direction is upside, not like typical x86 arch.
+- string literals are allocated at heap in runtime.
+  - Since there are string literal hashtable, it will be allocated maximum only once, not each time its expression be evaluated.
