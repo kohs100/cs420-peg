@@ -8,22 +8,7 @@ This project utilizes [rust-peg](https://github.com/kevinmehall/rust-peg) crate 
 
 ## How to run
 
-### Install rust
-
-```
-$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-### Run with C source file
-
-```
-$ git clone https://github.com/kohs100/cs420-peg
-$ cd cs420-peg
-$ cargo run -- test/fibo.c
-$ cargo run -- test/string.c
-$ cargo run -- test/malloc.c
-$ cargo run -- test/WRITE_YOUR_OWN.c
-```
+Please refer to [CS420-compiler](https://github.com/kohs100/cs420-compiler)
 
 ## Details
 
